@@ -1,0 +1,234 @@
+#!/bin/bash
+# By Adam ELAOUMARI under GNU General Public License v3.0
+# Contact : adam[at]admlbs.fr
+# Mosts comments are in french. If you have questions just e-mail me 
+LATEST_VERSION=$(curl -s 'https://uploads.admlbs.fr/version_apache')
+command=$1
+ACTUAL_VERSION=1.1
+SCRIPT_NAME="/usr/bin/apacheinstall"
+NEW_FILE="/tmp/apacheinstall"
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root or with sudo" #On vérifie que l'utilisateur est ABSOLUMENT en root sinon le script ne se lance pas
+  exit
+fi
+updater_check () {
+    if [ "$ACTUAL_VERSION" == "$LATEST_VERSION" ] 
+    then echo "Already last version."
+    else 
+  read  -p "You do not have the latest version of the program. We advise you to update it as soon as possible. Type y to start the update. (y or n)" doit 
+case $doit in  
+  n|N) echo -e "You refused to update the program." && exit ;; 
+  y|Y) echo -e "\e[32mLoading updater.\e[0m" ;;
+  *) echo  "Please type y (yes) or n (no)" && exit ;; 
+esac  
+	curl https://uploads.admlbs.fr/download.php?file=apache_updater --output /tmp/apacheinstall
+check_upgrade
+    fi
+}
+launch_install () {
+echo -e "\033[33m===================================== Server type =======================================\e[0m"
+OPTION=$(whiptail --nocancel --title "Web Server Installer" --menu "What do you want to install ?" 15 60 4 \
+"1" "Only Apache + PHP" \
+"2" "Apache + PHP + MYSQL " \
+"3" "Apache + PHP + MYSQL + Phpmyadmin" 3>&1 1>&2 2>&3)
+
+if [ "$OPTION" = 1 ]; then
+      install_apache
+else
+
+
+if [ "$OPTION" = 2 ]; then
+     install_apache
+     install_mysql
+else
+  if [ "$OPTION" = 3 ]; then
+    install_apache
+    install_mysql
+    MDPPHPMYADMIN=$(whiptail --title "McInstall" --inputbox "The script will create a MYSQL user with the same rights as the root user to ensure that you can access it with PHPMyAdmin.The username of the user will be "LOGINADMIN". Please choose a password." 10 60  3>&1 1>&2 2>&3)
+    mysql -u root -paaaa   -e "CREATE USER 'LOGINADMIN'@'%' IDENTIFIED BY '$MDPPHPMYADMIN';GRANT ALL PRIVILEGES ON *.* TO 'LOGINADMIN'@'%' REQUIRE NONE WITH GRANT OPTION MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0"
+    apt-get -y install  mcrypt
+    apt-get -y install phpmyadmin
+
+fi
+
+fi
+
+fi
+
+
+}
+
+help_message () { # Variable qui affiche le message d'aide 
+echo "              Apache Web-Server Auto Installer Commands"
+echo "          info : Show infos about the script and check for update." # Cette option vérifie les mises à jour mais ne les installe pas
+echo "          update : Update the script"
+echo "          install : Install or uninstall an Apache server."
+echo "          help : Show this message"
+}
+
+check_upgrade () { 
+
+
+  [ -f "$NEW_FILE" ] && {
+
+
+    cp "$NEW_FILE" "$SCRIPT_NAME"
+    chmod 0777 "$SCRIPT_NAME"
+    rm -f "$NEW_FILE"
+
+clear
+echo "The script have been updated"
+    exit 0
+  }
+}
+#Updater qui fonctionne de la manière suivante 
+# Si la variable ACTUAL_VERSION n'est pas égale à LATEST_VERSION (la variable LATEST_VERSION est récupérée avec une requête cURL) le progamme de MAJ se lance sinon rien ne se passe et le script se lance normalement
+
+#On installe LE prérequis (ici screen) et applique les mises-à-jours 
+prerequis_install () {
+apt-get install screen
+
+screen -dm apt-get update 
+screen -dm apt-get upgrade -y
+# Keep checking if the process is running. And keep a count.
+{
+        percentage="0"
+        while (true)
+        do
+            proc=$(ps aux | grep -v grep | grep -e "apt")
+            if [[ "$proc" == "" ]] && [[ "$percentage" -eq "0" ]];
+            then
+                break;
+            elif [[ "$proc" == "" ]] && [[ "$percentage" -gt "0" ]];
+            then
+                sleep 2
+                echo 98
+                sleep 1
+                echo 99
+                sleep 1
+                echo 100
+                sleep 1
+                break;
+            elif [[ "51" -eq "$percentage" ]]
+            then
+                percentage="30"
+            fi
+            sleep 1
+            echo $percentage
+            percentage=$(expr $percentage + 1)
+        done
+} | whiptail --title "Web Server Installer" --gauge "Updating..." 8 78 0
+clear
+}
+install_mysql () {
+        whiptail --title "Web Server Installer" --yes-button "Yes" --no-button "No" --yesno "Do you wish to install a database ?" 20 80
+        choice_database_install=$?
+        if [ $choice_database_install = 0 ]; then
+        apt-get -y install mysql-server
+clear
+        mysql_secure_installation
+        else
+    echo "You chose Cancel.No database will be installed."
+fi
+}
+
+# Fonction pour installer apache et PHP
+install_apache () {
+    cd /tmp/
+    whiptail --title "Web Server Installer" --yes-button "I agree" --no-button "I disagree" --yesno "The script will install the last version of apache2. For security reasons, it will install the last version of php." 20 80
+    APACHE_PHPEXTENSIONS=$(whiptail --title "Web Server Installer" --checklist \
+"Choose PHP Extensions using space." 20 78 4 \
+"libapache2-mod-php7.0" "Default PHP Extension for Apache 2" ON \
+"php7.0-mysql" "PHP For MYSQL " ON \
+"php7.0-curl" "cURL Extension for PHP" ON \
+"php7.0-json" "PHP Extension for JSON" ON \
+"php7.0-gd" "PHP Extension" ON \
+"php7.0-mcrypt" "PHP Extension" ON \
+"php7.0-msgpack" "PHP Extension" ON \
+"php7.0-intl" "PHP Extension" ON \
+"php7.0-sqlite3" "PHP Extension" ON \
+"php7.0-gmp" "PHP Extension" ON \
+"php7.0-geoip" "PHP Extension" ON \
+"php7.0-mbstring" "PHP Extension" ON \
+"php7.0-xml" "PHP Extension" ON \
+"php7.0-zip" "PHP Extension" ON  3>&1 1>&2 2>&3)
+echo "$APACHE_PHPEXTENSIONS" >> /tmp/php_extensions.txt
+sed -i 's/"//g' /tmp/php_extensions.txt # On va enlever les espaces pour permettre à apt de bien interprêter la commande
+APACHE_PHPEXTENSIONS_CORREC=`cat /tmp/php_extensions.txt`
+screen -dm apt-get -y install apache2 $APACHE_PHPEXTENSIONS_CORREC
+{
+        percentage="0"
+        while (true)
+        do
+            proc=$(ps aux | grep -v grep | grep -e "apt")
+            if [[ "$proc" == "" ]] && [[ "$percentage" -eq "0" ]];
+            then
+                break;
+            elif [[ "$proc" == "" ]] && [[ "$percentage" -gt "0" ]];
+            then
+                sleep 2
+                echo 98
+                sleep 1
+                echo 99
+                sleep 1
+                echo 100
+                sleep 1
+                break;
+            elif [[ "51" -eq "$percentage" ]]
+            then
+                percentage="30"
+            fi
+            sleep 1
+            echo $percentage
+            percentage=$(expr $percentage + 1)
+        done
+} | whiptail --title "Web Server Installer" --gauge "Installing..." 8 78 0
+rm /tmp/php_extensions.txt
+#fi
+}
+
+    if [ "$ACTUAL_VERSION" == "$LATEST_VERSION" ] 
+    then echo "Already last version."
+    else 
+  read  -p "You do not have the latest version of the program. We advise you to update it as soon as possible. Type y to start the update. (y or n)" doit 
+case $doit in  
+  n|N) echo -e "You refused to update the program." && exit ;; 
+  y|Y) echo -e "\e[32mLoading updater.\e[0m" ;;
+  *) echo  "Please type y (yes) or n (no)" && exit ;; 
+esac  
+	curl https://uploads.admlbs.fr/download.php?file=apache_updater --output /tmp/apacheinstall
+check_upgrade
+    fi
+# $command = la valeur de ce qui est écrit après le "apache"
+
+if [ "$command" ==  "" ]; # Ici on a affaire à la première ligne de code qui va être vraiment exécutée et visible pour l'utilisateur.
+then 
+help_message
+else
+  if [ "$command" == "help" ]; then
+help_message
+else 
+if [ "$command" ==  "install" ]; then # Ici si la valeur de la variable commande est égale à "install" on lance l'installation, logique.
+prerequis_install
+launch_install
+else
+if [ "$command" == "update" ]; then
+updater_check
+else
+if [ "$command" == "info" ]; then
+    echo "------------------------------- Apache Installer -------------------------------"
+echo -e "\033[32m===================================== Infos =====================================\e[0m"
+echo "Version : $ACTUAL_VERSION Latest Version : $LATEST_VERSION"
+echo "Developper : Adam - LaaBaSe"
+echo "Contact : adam@admlbs.fr"
+updater_check
+else
+if [ "$command" == "$command" ]; then #Ici c est une ligne qui est là juste pour faire en sorte que si l'utilisateur marque n importe quoi, ça lui affiche automatiquement le message d aide
+help_message
+
+fi
+fi
+fi
+fi
+fi
+fi
