@@ -21,7 +21,7 @@
 
 * Automatically install all prerequisites
 * Install both MySQL (MariaDB & PhpMyadmin) and apache at the same time.
-* Using the latest stable versions of APache, MariaDB, PHP and PHPMyAdmin.
+* Using the latest stable versions of Apache, MariaDB, PHP and PHPMyAdmin.
 
 
 # Supported versions
